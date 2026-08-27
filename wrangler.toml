@@ -17,6 +17,7 @@ ENVIRONMENT = "production"
 #   未配置时使用默认 admin/admin，首次登录后请立即修改。
 # JWT 签名密钥同理：`wrangler secret put JWT_SECRET`
 VITE_API_URL = "/api"
+VITE_SITE_URL = "https://nextlist.772653.xyz"
 
 [[kv_namespaces]]
 binding = "OPENLISTNEXT_KV"
