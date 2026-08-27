@@ -17,7 +17,7 @@ const MustUser = (props: { children: JSXElement }) => {
         // /me 在无令牌时会返回游客身份（免登录浏览首页），
         // 但管理后台仅限登录用户访问：游客一律送回登录页
         if (UserMethods.is_guest(me)) {
-          to("/@login", true)
+          to("/login", true)
           return
         }
         setMe(me)
@@ -70,11 +70,11 @@ const UserOrGuest = (props: { children: JSXElement }) => {
         if (
           redirectPath &&
           redirectPath !== "/" &&
-          redirectPath !== "/@login"
+          redirectPath !== "/login"
         ) {
-          to(`/@login?redirect=${encodeURIComponent(redirectPath)}`, true)
+          to(`/login?redirect=${encodeURIComponent(redirectPath)}`, true)
         } else {
-          to("/@login", true)
+          to("/login", true)
         }
       }
     }
