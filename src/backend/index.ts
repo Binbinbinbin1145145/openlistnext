@@ -34,35 +34,61 @@ export function setSpaFallbackHtml(html: string) {
   spaFallbackHtml = html
 }
 
+// ============================================
+// 修改点：SPA 回退逻辑重构
+// ============================================
 app.all("*", async (c) => {
+  const url = new URL(c.req.url)
   const env = c.env as any
-  if (env && env.ASSETS && typeof env.ASSETS.fetch === "function") {
-    const url = new URL(c.req.url)
-    const res = await env.ASSETS.fetch(c.req.raw)
-    if (res.status !== 404) {
-      // 修复「部署新版本后生产环境仍是旧界面」：index.html 若不设缓存头，
-      // 会被 Cloudflare 边缘/浏览器长期缓存，导致旧 HTML 引用旧 hash 的 JS/CSS。
-      // 只对 HTML 入口 no-cache（JS/CSS 带 hash 可安全长期缓存）。
-      if (url.pathname === "/" || url.pathname === "/index.html") {
-        const headers = new Headers(res.headers)
-        headers.set("Cache-Control", "no-cache, must-revalidate")
-        return new Response(res.body, { status: res.status, headers })
+
+  // 1. API 请求直接跳过（让 Hono 路由处理）
+  if (url.pathname.startsWith('/api/')) {
+    return c.text('Not Found', 404)
+  }
+
+  // 2. 处理 GET/HEAD 请求
+  if (c.req.method === "GET" || c.req.method === "HEAD") {
+    // 优先使用 ASSETS 绑定（Cloudflare Workers 环境）
+    if (env && env.ASSETS && typeof env.ASSETS.fetch === "function") {
+      const assetRes = await env.ASSETS.fetch(c.req.raw)
+
+      // 如果找到的是具体静态文件（JS/CSS/图片等），直接返回
+      if (assetRes.status === 200) {
+        // 判断是否为静态资源文件（带扩展名）
+        const isStaticFile = /\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|map)$/.test(url.pathname)
+        if (isStaticFile) {
+          return assetRes
+        }
+        
+        // 如果是 / 或 /index.html，设置 no-cache 后返回
+        if (url.pathname === "/" || url.pathname === "/index.html") {
+          const headers = new Headers(assetRes.headers)
+          headers.set("Cache-Control", "no-cache, must-revalidate")
+          return new Response(assetRes.body, { status: assetRes.status, headers })
+        }
       }
-      return res
+
+      // 【核心修改】所有其他情况（包括 404、带 @ 的特殊路径、/manage 等）
+      // 都返回 index.html，让前端路由接管
+      const indexReq = new Request(`${url.origin}/index.html`, c.req.raw)
+      const indexRes = await env.ASSETS.fetch(indexReq)
+      
+      // 对 index.html 强制设置 no-cache
+      const headers = new Headers(indexRes.headers)
+      headers.set("Cache-Control", "no-cache, must-revalidate")
+      return new Response(indexRes.body, { status: 200, headers })
     }
-    // SPA fallback: return index.html for non-asset routes (e.g. /login, /manage)
-    const indexReq = new Request(`${url.origin}/index.html`, c.req.raw)
-    return env.ASSETS.fetch(indexReq)
+
+    // 3. 兜底：EdgeOne 等无 ASSETS 的环境，使用内联 HTML
+    if (spaFallbackHtml) {
+      return c.body(spaFallbackHtml, 200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-cache, must-revalidate",
+      })
+    }
   }
-  // EdgeOne 等 ASSETS 缺席的环境：直接返回构建期内联的 SPA 壳，
-  // 避免前端路由（/add、/@manage/* 等）落到 404 文本导致整站不可达
-  if (spaFallbackHtml && (c.req.method === "GET" || c.req.method === "HEAD")) {
-    return c.body(spaFallbackHtml, 200, {
-      "Content-Type": "text/html; charset=utf-8",
-      // HTML 入口必须 no-cache，否则新版本部署后旧 HTML 仍引用旧 hash 的 JS/CSS
-      "Cache-Control": "no-cache, must-revalidate",
-    })
-  }
+
+  // 其他情况返回 404
   return c.text("404 Not Found", 404)
 })
 
